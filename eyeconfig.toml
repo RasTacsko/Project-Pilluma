@@ -12,6 +12,6 @@ height = 32        # Default height of the right eye
 roundness = 8      # Default roundness of the right eye
 
 [color]
+# if screen mode is 1 bit it will be default to black and white
 #bg = "yellow"      # Apply only for color screens
 #eye = "red"	       # Apply only for color screens
-# Values currently set to color 320x240 screen! for i2c oled use the nondev eyeconfig!

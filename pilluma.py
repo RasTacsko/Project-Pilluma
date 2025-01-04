@@ -19,7 +19,6 @@ import toml
 import random
 import time
 import threading
-import pantilthat
 from PIL import Image, ImageDraw
 from luma.core.interface.serial import i2c, spi
 import luma.oled.device as oled
@@ -652,23 +651,52 @@ def pantilt(device, config):
     :param device: The display device.
     :param config: Configuration dictionary.
     """
+    import pantilthat
     global current_offset_x, current_offset_y
 
     # Get movement constraints
     min_x_offset, max_x_offset, min_y_offset, max_y_offset = get_constraints(config, device)
 
+    # Initialize lists to store the last 4 offset values
+    offset_x_values = [0, 0, 0, 0, 0]
+    offset_y_values = [0, 0, 0, 0, 0]
+
+    # Initialize previous servo positions
+    prev_servo_x = None
+    prev_servo_y = None
+
     while True:
-        # Calculate proportional servo target values based on current offsets
-        servo_x = (current_offset_x - min_x_offset) / (max_x_offset - min_x_offset) * 2 * servo_limit_x - servo_limit_x
-        servo_y = (current_offset_y - min_y_offset) / (max_y_offset - min_y_offset) * 2 * servo_limit_y - servo_limit_y
+        # Update the lists with the current offsets
+        offset_x_values.append(current_offset_x)
+        offset_y_values.append(current_offset_y)
+        if len(offset_x_values) > 5:
+            offset_x_values.pop(0)
+        if len(offset_y_values) > 5:
+            offset_y_values.pop(0)
+
+        # Calculate the moving average of the last 4 offset values
+        avg_offset_x = sum(offset_x_values) / len(offset_x_values)
+        avg_offset_y = sum(offset_y_values) / len(offset_y_values)
+
+        # Calculate proportional servo target values based on the average offsets
+        servo_x = int((avg_offset_x - min_x_offset) / (max_x_offset - min_x_offset) * 2 * servo_limit_x - servo_limit_x)
+        servo_y = int((avg_offset_y - min_y_offset) / (max_y_offset - min_y_offset) * 2 * servo_limit_y - servo_limit_y)
 
         # Clamp the servo values to the limits
         servo_x = max(-servo_limit_x, min(servo_limit_x, servo_x))
         servo_y = max(-servo_limit_y, min(servo_limit_y, servo_y))
 
-        # Move the servos
-        pantilthat.pan(servo_x)
-        pantilthat.tilt(servo_y)
+        # Check if the servo positions have changed
+        if servo_x != prev_servo_x or servo_y != prev_servo_y:
+            # Move the servos
+            pantilthat.pan(servo_x)
+            pantilthat.tilt(servo_y)
+            prev_servo_x = servo_x
+            prev_servo_y = servo_y
+        else:
+            # Turn off the servos if there is no change
+            pantilthat.servo_enable(1, False)
+            pantilthat.servo_enable(2, False)
 
         # Control the update rate
         time.sleep(0.5 / config["render"]["fps"])
@@ -785,12 +813,12 @@ def main():
     curious_mode(device, config, curious=True)
     logging.info(f"Starting the idle animation")
     idle(device, config)
-    # time.sleep(10)
-    # shake_eyes(device, config, direction="h")
-    # time.sleep(10)
-    # shake_eyes(device, config, direction="v")
-    # time.sleep(10)
-    # shake_eyes(device, config)
+    time.sleep(10)
+    shake_eyes(device, config, direction="h")
+    time.sleep(10)
+    shake_eyes(device, config, direction="v")
+    time.sleep(10)
+    shake_eyes(device, config)
 
 if __name__ == "__main__":
     main()

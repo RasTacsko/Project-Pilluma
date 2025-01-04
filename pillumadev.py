@@ -19,7 +19,6 @@ import toml
 import random
 import time
 import threading
-import pantilthat
 from PIL import Image, ImageDraw
 from luma.core.interface.serial import i2c, spi
 import luma.oled.device as oled
@@ -29,6 +28,7 @@ import luma.lcd.device as lcd
 current_bg_color = "black"
 current_eye_color = "white"
 current_curious = False
+current_cyclops = False
 
 # Global variables for x/y offset for look based animations
 current_offset_x = 0
@@ -195,7 +195,8 @@ def draw_eyes(device, config):
     global eyelid_top_inner_left_height, eyelid_top_outer_left_height, eyelid_bottom_left_height
     global eyelid_top_inner_right_height, eyelid_top_outer_right_height, eyelid_bottom_right_height
     global current_eye_width_left, current_eye_width_right, current_eye_height_left, current_eye_height_right
-        
+    global current_cyclops
+
     # Ensure eyes are open by default if current_closed is None and closed if set it when loading        
     if current_closed is None:
         current_eye_height_left = config["eye"]["left"]["height"]
@@ -214,103 +215,180 @@ def draw_eyes(device, config):
         image = Image.new(device.mode, (device.width, device.height), bg_color)
         draw = ImageDraw.Draw(image)
 
-        # Eye parameters
-        left_eye = config["eye"]["left"]
-        right_eye = config["eye"]["right"]
-        distance = config["eye"]["distance"]
-        # Base dimensions for eyes
-        eye_width_left = left_eye["width"]
-        eye_width_right = right_eye["width"]
-        eye_height_left = current_eye_height_left if current_eye_height_left else left_eye["height"]
-        eye_height_right = current_eye_height_right if current_eye_height_right else right_eye["height"]
+        if current_cyclops:
+            # Cyclops mode: Draw a single eye in the center
+            eye_width = (config["eye"]["left"]["width"] + config["eye"]["right"]["width"]) // 2
+            eye_height = (current_eye_height_left + current_eye_height_right) // 2
+            roundness = (config["eye"]["left"]["roundness"] + config["eye"]["right"]["roundness"]) // 2
 
-        # Get movement constraints
-        min_x_offset, max_x_offset, min_y_offset, max_y_offset = get_constraints(config, device)
+            # Apply curious effect dynamically
+            if current_curious:
+                max_increase = 0.6  # Max increase by 40%
+                scale_factor = max_increase / (device.width // 2)
+                eye_width += int(scale_factor * abs(current_offset_x) * eye_width)
+                eye_height += int(scale_factor * abs(current_offset_x) * eye_height)
 
-        # Apply curious effect dynamically
-        if current_curious:
-            max_increase = 0.4  # Max increase by 40%
-            scale_factor = max_increase / (config["screen"]["width"] // 2)
-            if current_offset_x < 0:  # Moving left
-                eye_width_left += int(scale_factor * abs(current_offset_x) * left_eye["width"])
-                eye_width_right -= int(scale_factor * abs(current_offset_x) * right_eye["width"])
-                eye_height_left += int(scale_factor * abs(current_offset_x) * eye_height_left)
-                eye_height_right -= int(scale_factor * abs(current_offset_x) * eye_height_right)
-            elif current_offset_x > 0:  # Moving right
-                eye_height_left -= int(scale_factor * abs(current_offset_x) * eye_height_left)
-                eye_height_right += int(scale_factor * abs(current_offset_x) * eye_height_right)
-                eye_width_left -= int(scale_factor * abs(current_offset_x) * left_eye["width"])
-                eye_width_right += int(scale_factor * abs(current_offset_x) * right_eye["width"])
+            # Clamp sizes to ensure no negative or unrealistic dimensions
+            eye_height = max(2, eye_height)
+            eye_width = max(2, eye_width)
 
-        # Clamp sizes to ensure no negative or unrealistic dimensions
-        eye_height_left = max(2, eye_height_left)
-        eye_height_right = max(2, eye_height_right)
-        eye_width_left = max(2, eye_width_left)
-        eye_width_right = max(2, eye_width_right)
-
-        # Roundness of the rectangle
-        roundness_left = left_eye["roundness"]
-        roundness_right = right_eye["roundness"]
-        # Calculate eye positions coords: x0,y0 (top left corner) x1,y1 (bottom right corner)
-        left_eye_coords = (
-            device.width // 2 - eye_width_left - distance // 2 + current_offset_x,
-            device.height // 2 - eye_height_left // 2 + current_offset_y,
-            device.width // 2 - distance // 2 + current_offset_x,
-            device.height // 2 + eye_height_left // 2 + current_offset_y,
-        )
-        right_eye_coords = (
-            device.width // 2 + distance // 2 + current_offset_x,
-            device.height // 2 - eye_height_right // 2 + current_offset_y,
-            device.width // 2 + eye_width_right + distance // 2 + current_offset_x,
-            device.height // 2 + eye_height_right // 2 + current_offset_y,
-        )
-
-        # Draw the eyes draw.rounded_rectangle: width could be added for outline thickness
-        draw.rounded_rectangle(left_eye_coords, radius=roundness_left, outline=eye_color, fill=eye_color)
-        draw.rounded_rectangle(right_eye_coords, radius=roundness_right, outline=eye_color, fill=eye_color)
-
-        # Draw top eyelids draw.polygon: outline and width could be added for outline thickness
-        if eyelid_top_inner_left_height or eyelid_top_outer_left_height > 0:
-            draw.polygon([
-                (left_eye_coords[0], left_eye_coords[1]),
-                (left_eye_coords[0], left_eye_coords[1] + (eyelid_top_outer_left_height * eye_height_left // left_eye["height"])),
-                (left_eye_coords[2], left_eye_coords[1] + (eyelid_top_inner_left_height * eye_height_left // left_eye["height"])),
-                (left_eye_coords[2], left_eye_coords[1]),
-            ], fill=bg_color)
-        if eyelid_top_inner_right_height or eyelid_top_outer_right_height > 0:
-            draw.polygon([
-                (right_eye_coords[0], right_eye_coords[1]),
-                (right_eye_coords[0], right_eye_coords[1] + (eyelid_top_inner_right_height * eye_height_left // left_eye["height"])),
-                (right_eye_coords[2], right_eye_coords[1] + (eyelid_top_outer_right_height * eye_height_right // right_eye["height"])),
-                (right_eye_coords[2], right_eye_coords[1]),
-            ], fill=bg_color)
-        # Draw bottom eyelids
-        if eyelid_bottom_left_height > 0:
-            draw.rounded_rectangle(
-                (
-                    left_eye_coords[0],
-                    left_eye_coords[3] - (eyelid_bottom_left_height * eye_height_left // left_eye["height"]),
-                    left_eye_coords[2],
-                    left_eye_coords[3],
-                ),
-                radius=roundness_left,
-                outline=bg_color,
-                fill=bg_color,
+            eye_coords = (
+                device.width // 2 - eye_width // 2 + current_offset_x,
+                device.height // 2 - eye_height // 2 + current_offset_y,
+                device.width // 2 + eye_width // 2 + current_offset_x,
+                device.height // 2 + eye_height // 2 + current_offset_y,
             )
-        if eyelid_bottom_right_height > 0:
-            draw.rounded_rectangle(
-                (
-                    right_eye_coords[0],
-                    right_eye_coords[3] - (eyelid_bottom_right_height * eye_height_right // right_eye["height"]),
-                    right_eye_coords[2],
-                    right_eye_coords[3],
-                ),
-                radius=roundness_right,
-                outline=bg_color,
-                fill=bg_color,
+
+            draw.rounded_rectangle(eye_coords, radius=roundness, outline=eye_color, fill=eye_color)
+
+            # Draw top eyelids
+            if eyelid_top_inner_left_height or eyelid_top_outer_left_height > 0:
+                draw.polygon([
+                    (eye_coords[0], eye_coords[1]),
+                    (eye_coords[0], eye_coords[1] + (eyelid_top_outer_left_height * eye_height // config["eye"]["left"]["height"])),
+                    (device.width // 2 + current_offset_x, eye_coords[1] + (eyelid_top_inner_left_height * eye_height // config["eye"]["left"]["height"])),
+                    (device.width // 2 + current_offset_x, eye_coords[1]),
+                ], fill=bg_color)
+            if eyelid_top_inner_right_height or eyelid_top_outer_right_height > 0:
+                draw.polygon([
+                    (device.width // 2 + current_offset_x, eye_coords[1]),
+                    (device.width // 2 + current_offset_x, eye_coords[1] + (eyelid_top_inner_right_height * eye_height // config["eye"]["right"]["height"])),
+                    (eye_coords[2], eye_coords[1] + (eyelid_top_outer_right_height * eye_height // config["eye"]["right"]["height"])),
+                    (eye_coords[2], eye_coords[1]),
+                ], fill=bg_color)
+            # Draw bottom eyelids as usual
+            if eyelid_bottom_left_height > 0:
+                draw.rounded_rectangle(
+                    (
+                        eye_coords[0],
+                        eye_coords[3] - (eyelid_bottom_left_height * eye_height // config["eye"]["left"]["height"]),
+                        eye_coords[2],
+                        eye_coords[3],
+                    ),
+                    radius=roundness,
+                    outline=bg_color,
+                    fill=bg_color,
+                )
+        else:
+            # Normal mode: Draw two eyes
+            # Eye parameters
+            left_eye = config["eye"]["left"]
+            right_eye = config["eye"]["right"]
+            distance = config["eye"]["distance"]
+            # Base dimensions for eyes
+            eye_width_left = left_eye["width"]
+            eye_width_right = right_eye["width"]
+            eye_height_left = current_eye_height_left if current_eye_height_left else left_eye["height"]
+            eye_height_right = current_eye_height_right if current_eye_height_right else right_eye["height"]
+
+            # Get movement constraints
+            min_x_offset, max_x_offset, min_y_offset, max_y_offset = get_constraints(config, device)
+
+            # Apply curious effect dynamically
+            if current_curious:
+                max_increase = 0.6  # Max increase by 40%
+                scale_factor = max_increase / (config["screen"]["width"] // 2)
+                if current_offset_x < 0:  # Moving left
+                    eye_width_left += int(scale_factor * abs(current_offset_x) * left_eye["width"])
+                    eye_width_right -= int(scale_factor * abs(current_offset_x) * right_eye["width"])
+                    eye_height_left += int(scale_factor * abs(current_offset_x) * eye_height_left)
+                    eye_height_right -= int(scale_factor * abs(current_offset_x) * eye_height_right)
+                elif current_offset_x > 0:  # Moving right
+                    eye_height_left -= int(scale_factor * abs(current_offset_x) * eye_height_left)
+                    eye_height_right += int(scale_factor * abs(current_offset_x) * eye_height_right)
+                    eye_width_left -= int(scale_factor * abs(current_offset_x) * left_eye["width"])
+                    eye_width_right += int(scale_factor * abs(current_offset_x) * right_eye["width"])
+
+            # Clamp sizes to ensure no negative or unrealistic dimensions
+            eye_height_left = max(2, eye_height_left)
+            eye_height_right = max(2, eye_height_right)
+            eye_width_left = max(2, eye_width_left)
+            eye_width_right = max(2, eye_width_right)
+
+            # Roundness of the rectangle
+            roundness_left = left_eye["roundness"]
+            roundness_right = right_eye["roundness"]
+            # Calculate eye positions coords: x0,y0 (top left corner) x1,y1 (bottom right corner)
+            left_eye_coords = (
+                device.width // 2 - eye_width_left - distance // 2 + current_offset_x,
+                device.height // 2 - eye_height_left // 2 + current_offset_y,
+                device.width // 2 - distance // 2 + current_offset_x,
+                device.height // 2 + eye_height_left // 2 + current_offset_y,
             )
+            right_eye_coords = (
+                device.width // 2 + distance // 2 + current_offset_x,
+                device.height // 2 - eye_height_right // 2 + current_offset_y,
+                device.width // 2 + eye_width_right + distance // 2 + current_offset_x,
+                device.height // 2 + eye_height_right // 2 + current_offset_y,
+            )
+
+            # Draw the eyes draw.rounded_rectangle: width could be added for outline thickness
+            if not current_cyclops or current_closed == "right":
+                draw.rounded_rectangle(left_eye_coords, radius=roundness_left, outline=eye_color, fill=eye_color)
+            if not current_cyclops or current_closed == "left":
+                draw.rounded_rectangle(right_eye_coords, radius=roundness_right, outline=eye_color, fill=eye_color)
+
+            # Draw top eyelids draw.polygon: outline and width could be added for outline thickness
+            if eyelid_top_inner_left_height or eyelid_top_outer_left_height > 0:
+                draw.polygon([
+                    (left_eye_coords[0], left_eye_coords[1]),
+                    (left_eye_coords[0], left_eye_coords[1] + (eyelid_top_outer_left_height * eye_height_left // left_eye["height"])),
+                    (left_eye_coords[2], left_eye_coords[1] + (eyelid_top_inner_left_height * eye_height_left // left_eye["height"])),
+                    (left_eye_coords[2], left_eye_coords[1]),
+                ], fill=bg_color)
+            if eyelid_top_inner_right_height or eyelid_top_outer_right_height > 0:
+                draw.polygon([
+                    (right_eye_coords[0], right_eye_coords[1]),
+                    (right_eye_coords[0], right_eye_coords[1] + (eyelid_top_inner_right_height * eye_height_left // left_eye["height"])),
+                    (right_eye_coords[2], right_eye_coords[1] + (eyelid_top_outer_right_height * eye_height_right // right_eye["height"])),
+                    (right_eye_coords[2], right_eye_coords[1]),
+                ], fill=bg_color)
+            # Draw bottom eyelids
+            if eyelid_bottom_left_height > 0:
+                draw.rounded_rectangle(
+                    (
+                        left_eye_coords[0],
+                        left_eye_coords[3] - (eyelid_bottom_left_height * eye_height_left // left_eye["height"]),
+                        left_eye_coords[2],
+                        left_eye_coords[3],
+                    ),
+                    radius=roundness_left,
+                    outline=bg_color,
+                    fill=bg_color,
+                )
+            if eyelid_bottom_right_height > 0:
+                draw.rounded_rectangle(
+                    (
+                        right_eye_coords[0],
+                        right_eye_coords[3] - (eyelid_bottom_right_height * eye_height_right // right_eye["height"]),
+                        right_eye_coords[2],
+                        right_eye_coords[3],
+                    ),
+                    radius=roundness_right,
+                    outline=bg_color,
+                    fill=bg_color,
+                )
+
         # Display the image
         device.display(image)
+
+def cyclops_mode(device, config, cyclops_mode):
+    """
+    Enables or disables the cyclops mode.
+    :param device: The display device.
+    :param config: Configuration dictionary.
+    :param cyclops_mode: Boolean to enable or disable cyclops mode.
+    """
+    global current_cyclops, current_eye_height_left, current_eye_height_right
+    # Close eyes before changing to cyclops mode
+    close_eyes(device, config, eye="both", speed="medium")
+    # Set the cyclops mode state
+    current_cyclops = cyclops_mode
+    # Reset eye heights to default
+    current_eye_height_left = config["eye"]["left"]["height"]
+    current_eye_height_right = config["eye"]["right"]["height"]
+    # Open eyes after changing the cyclops mode state
+    open_eyes(device, config, eye="both", speed="medium")
 
 def change_face(device, config, new_face=None):
     global current_face, current_closed
@@ -585,7 +663,7 @@ def close_eyes(device, config, eye=None, speed="medium"):
             time.sleep(1 / config["render"]["fps"])  # Control the frame rate
         
 def open_eyes(device, config, eye=None, speed="medium"):
-    global current_closed, current_eye_height_left, current_eye_height_right
+    global current_closed, current_eye_height_left, current_eye_height_right, current_cyclops
 
     if not current_closed:  # If eyes are already open, skip animation
         logging.warning("Eyes are already open. Skipping animation.")
@@ -640,6 +718,11 @@ def open_eyes(device, config, eye=None, speed="medium"):
             if current_eye_height_right < right_eye_height_orig:
                 current_eye_height_right = min(right_eye_height_orig, current_eye_height_right + movement_speed)
             time.sleep(1 / config["render"]["fps"])  # Control the frame rate
+
+    # Ensure eye heights are set correctly for cyclops mode
+    if current_cyclops:
+        current_eye_height_left = left_eye_height_orig
+        current_eye_height_right = right_eye_height_orig
         
 def blink_eyes(device, config, eye="both", speed="fast"):
     close_eyes(device, config, eye=eye, speed=speed)
@@ -652,23 +735,52 @@ def pantilt(device, config):
     :param device: The display device.
     :param config: Configuration dictionary.
     """
+    import pantilthat
     global current_offset_x, current_offset_y
 
     # Get movement constraints
     min_x_offset, max_x_offset, min_y_offset, max_y_offset = get_constraints(config, device)
 
+    # Initialize lists to store the last 4 offset values
+    offset_x_values = [0, 0, 0, 0, 0]
+    offset_y_values = [0, 0, 0, 0, 0]
+
+    # Initialize previous servo positions
+    prev_servo_x = None
+    prev_servo_y = None
+
     while True:
-        # Calculate proportional servo target values based on current offsets
-        servo_x = (current_offset_x - min_x_offset) / (max_x_offset - min_x_offset) * 2 * servo_limit_x - servo_limit_x
-        servo_y = (current_offset_y - min_y_offset) / (max_y_offset - min_y_offset) * 2 * servo_limit_y - servo_limit_y
+        # Update the lists with the current offsets
+        offset_x_values.append(current_offset_x)
+        offset_y_values.append(current_offset_y)
+        if len(offset_x_values) > 5:
+            offset_x_values.pop(0)
+        if len(offset_y_values) > 5:
+            offset_y_values.pop(0)
+
+        # Calculate the moving average of the last 4 offset values
+        avg_offset_x = sum(offset_x_values) / len(offset_x_values)
+        avg_offset_y = sum(offset_y_values) / len(offset_y_values)
+
+        # Calculate proportional servo target values based on the average offsets
+        servo_x = int((avg_offset_x - min_x_offset) / (max_x_offset - min_x_offset) * 2 * servo_limit_x - servo_limit_x)
+        servo_y = int((avg_offset_y - min_y_offset) / (max_y_offset - min_y_offset) * 2 * servo_limit_y - servo_limit_y)
 
         # Clamp the servo values to the limits
         servo_x = max(-servo_limit_x, min(servo_limit_x, servo_x))
         servo_y = max(-servo_limit_y, min(servo_limit_y, servo_y))
 
-        # Move the servos
-        pantilthat.pan(servo_x)
-        pantilthat.tilt(servo_y)
+        # Check if the servo positions have changed
+        if servo_x != prev_servo_x or servo_y != prev_servo_y:
+            # Move the servos
+            pantilthat.pan(servo_x)
+            pantilthat.tilt(servo_y)
+            prev_servo_x = servo_x
+            prev_servo_y = servo_y
+        else:
+            # Turn off the servos if there is no change
+            pantilthat.servo_enable(1, False)
+            pantilthat.servo_enable(2, False)
 
         # Control the update rate
         time.sleep(0.5 / config["render"]["fps"])
@@ -722,10 +834,21 @@ def idle(device, config):
             new_face = random.choice(faces)
             time.sleep(face_change_interval)
             change_face(device, config, new_face=new_face)
+
+    def toggle_cyclops_mode_randomly():
+        """
+        Toggles cyclops mode at random intervals.
+        """
+        while True:
+            cyclops_interval = random.uniform(5, 10)
+            time.sleep(cyclops_interval)
+            cyclops_mode(device, config, cyclops_mode=not current_cyclops)
+
     # Start the threads
     threading.Thread(target=blink).start()
     threading.Thread(target=look_around).start()
     threading.Thread(target=change_face_randomly).start()
+    threading.Thread(target=toggle_cyclops_mode_randomly).start()
 
 def start_closed(device, config):
     global current_closed
@@ -782,16 +905,12 @@ def main():
     start_closed(device, config)
     wake_up(device, config)
     time.sleep(2)
+    logging.info(f"Starting the curious mode")
     curious_mode(device, config, curious=True)
+    # logging.info(f"Starting the cyclops mode")
+    # cyclops_mode(device, config, cyclops_mode=True)
     logging.info(f"Starting the idle animation")
     idle(device, config)
-    time.sleep(10)
-    shake_eyes(device, config, direction="h")
-    time.sleep(10)
-    shake_eyes(device, config, direction="v")
-    time.sleep(10)
-    shake_eyes(device, config)
 
 if __name__ == "__main__":
     main()
-    
