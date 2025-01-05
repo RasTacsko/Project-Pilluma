@@ -1,0 +1,21 @@
++---------------------------------------------+
+| Screen Config                               |
++---------------------------------------------+
+| Type: oled           | Interface: i2c       |
+| Driver: ssd1306      | I2C address: 0x3c    |
+| Width: 128           | I2C BUS: 1           |
+| Height: 64           |                      |
+| Rotate: 0            |                      |
++---------------------------------------------+
+| Eye Config                                  |
++---------------------------------------------+
+| Left Width: 32       | Right Width: 32      |
+| Left Height: 32      | Right Height: 32     |
+| Left Roundness: 8    | Right Roundness: 8   |
+| Distance: 10         | FPS: 30              |
++---------------------------------------------+
+| Current Face: curious                       |
+| Current Offsets: (-2, -22)                  |
+| Current Curious: 1                          |
+| Current Cyclops: 1                          |
++---------------------------------------------+

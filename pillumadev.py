@@ -23,6 +23,7 @@ from PIL import Image, ImageDraw
 from luma.core.interface.serial import i2c, spi
 import luma.oled.device as oled
 import luma.lcd.device as lcd
+import curses
 
 # Global variable to track and pass on to functions
 current_bg_color = "black"
@@ -75,7 +76,7 @@ DEFAULT_SCREEN_CONFIG = {
 }
 
 # Default rendering parameters
-DEFAULT_RENDER_CONFIG = {
+DEFAULT_EYE_CONFIG = {
     "render": {
         "fps": 30,  # Default refresh rate
     },
@@ -182,6 +183,68 @@ def get_device(config):
     except Exception as e:
         logging.error(f"Error initializing device: {e}")
         raise
+
+class TerminalLogHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.log_messages = []
+
+    def emit(self, record):
+        log_entry = self.format(record)
+        self.log_messages.append(log_entry)
+        if len(self.log_messages) > 20:
+            self.log_messages.pop(0)
+
+terminal_log_handler = TerminalLogHandler()
+terminal_log_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+logging.getLogger().addHandler(terminal_log_handler)
+
+def display_ui():
+    global current_face, current_offset_x, current_offset_y, current_curious, current_cyclops
+
+    # Load screen and render configurations
+    loaded_screen_config = load_config("screenconfig.toml", DEFAULT_SCREEN_CONFIG)
+    loaded_eye_config = load_config("eyeconfig.toml", DEFAULT_EYE_CONFIG)
+
+    while True:
+        # Clear screen
+        print("\033[H\033[J", end="")
+
+        # Gather variables
+        screen_config = loaded_screen_config["screen"]
+        eye_config = loaded_eye_config["eye"]
+
+        # Format the table with fixed width columns
+        table = f"""
+        +---------------------------------------------+
+        | Screen Config                               |
+        +---------------------------------------------+
+        | Type: {screen_config['type']:<15} | Interface: {screen_config['interface']:<10} |
+        | Driver: {screen_config['driver']:<13} | I2C address: {screen_config['i2c']['address']:<8} |
+        | Width: {screen_config['width']:<14} | I2C BUS: {screen_config['i2c']['i2c_port']:<10} |
+        | Height: {screen_config['height']:<13} |                      |
+        | Rotate: {screen_config['rotate']:<13} |                      |
+        +---------------------------------------------+
+        | Eye Config                                  |
+        +---------------------------------------------+
+        | Left Width: {eye_config['left']['width']:<10} | Right Width: {eye_config['right']['width']:<10} |
+        | Left Height: {eye_config['left']['height']:<9} | Right Height: {eye_config['right']['height']:<9} |
+        | Left Roundness: {eye_config['left']['roundness']:<7} | Right Roundness: {eye_config['right']['roundness']:<7} |
+        | Distance: {eye_config['distance']:<11} | FPS: {loaded_eye_config['render']['fps']:<14} |
+        +---------------------------------------------+
+        | Current Face: {current_face:<29} |
+        | Current Offsets: ({current_offset_x}, {current_offset_y})          |
+        | Current Curious: {current_curious:<26} |
+        | Current Cyclops: {current_cyclops:<26} |
+        +---------------------------------------------+
+        """
+        print(table)
+
+        # Display the last 20 lines of logs
+        for log in terminal_log_handler.log_messages:
+            print(log)
+
+        time.sleep(1)
 
 def draw_eyes(device, config):
     """
@@ -887,9 +950,9 @@ def main():
     """
     # Load screen and render configurations
     screen_config = load_config("screenconfig.toml", DEFAULT_SCREEN_CONFIG)
-    render_config = load_config("eyeconfig.toml", DEFAULT_RENDER_CONFIG)
+    eye_config = load_config("eyeconfig.toml", DEFAULT_EYE_CONFIG)
     # Merge configurations
-    config = {**screen_config, **render_config}
+    config = {**screen_config, **eye_config}
     # Initialize the display device
     device = get_device(config)
     # Verify device initialization
@@ -900,6 +963,10 @@ def main():
         threading.Thread(target=pantilt, args=(device, config)).start()
     # Start the draw_eyes loop in a separate thread with initial state closed
     # threading.Thread(target=draw_eyes, args=(device, config)).start()
+    
+    # Start the UI display in a separate thread
+    threading.Thread(target=display_ui).start()
+
     # Start the idle function
     logging.info(f"Starting the wakeup animation")
     start_closed(device, config)
