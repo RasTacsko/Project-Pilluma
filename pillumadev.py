@@ -30,6 +30,7 @@ current_bg_color = "black"
 current_eye_color = "white"
 current_curious = False
 current_cyclops = False
+lock = threading.Lock() # Thread locking to avoid conflicts when animation triggered at the same time
 
 # Global variables for x/y offset for look based animations
 current_offset_x = 0
@@ -443,15 +444,16 @@ def cyclops_mode(device, config, cyclops_mode):
     :param cyclops_mode: Boolean to enable or disable cyclops mode.
     """
     global current_cyclops, current_eye_height_left, current_eye_height_right
-    # Close eyes before changing to cyclops mode
-    close_eyes(device, config, eye="both", speed="medium")
-    # Set the cyclops mode state
-    current_cyclops = cyclops_mode
-    # Reset eye heights to default
-    current_eye_height_left = config["eye"]["left"]["height"]
-    current_eye_height_right = config["eye"]["right"]["height"]
-    # Open eyes after changing the cyclops mode state
-    open_eyes(device, config, eye="both", speed="medium")
+    with lock:
+        # Close eyes before changing to cyclops mode
+        close_eyes(device, config, eye="both", speed="medium")
+        # Set the cyclops mode state
+        current_cyclops = cyclops_mode
+        # Reset eye heights to default
+        current_eye_height_left = config["eye"]["left"]["height"]
+        current_eye_height_right = config["eye"]["right"]["height"]
+        # Open eyes after changing the cyclops mode state
+        open_eyes(device, config, eye="both", speed="medium")
 
 def change_face(device, config, new_face=None):
     global current_face, current_closed
@@ -727,65 +729,64 @@ def close_eyes(device, config, eye=None, speed="medium"):
         
 def open_eyes(device, config, eye=None, speed="medium"):
     global current_closed, current_eye_height_left, current_eye_height_right, current_cyclops
+    with lock:
+        if not current_closed:  # If eyes are already open, skip animation
+            logging.warning("Eyes are already open. Skipping animation.")
+            return
 
-    if not current_closed:  # If eyes are already open, skip animation
-        logging.warning("Eyes are already open. Skipping animation.")
-        return
+        # Default blink heights based on current_closed state
+        left_eye_height_orig = config["eye"]["left"]["height"]
+        right_eye_height_orig = config["eye"]["right"]["height"]
 
-    # Default blink heights based on current_closed state
-    left_eye_height_orig = config["eye"]["left"]["height"]
-    right_eye_height_orig = config["eye"]["right"]["height"]
+        # Ensure blink heights are initialized to their closed state
+        if current_closed == "both":
+            current_eye_height_left = 1
+            current_eye_height_right = 1
+        elif current_closed == "left":
+            current_eye_height_left = 1
+            current_eye_height_right = right_eye_height_orig
+        elif current_closed == "right":
+            current_eye_height_left = left_eye_height_orig
+            current_eye_height_right = 1
+        else:
+            logging.info("Eyes are already open. Skipping opening animation.")
+            return
 
-    # Ensure blink heights are initialized to their closed state
-    if current_closed == "both":
-        current_eye_height_left = 1
-        current_eye_height_right = 1
-    elif current_closed == "left":
-        current_eye_height_left = 1
-        current_eye_height_right = right_eye_height_orig
-    elif current_closed == "right":
-        current_eye_height_left = left_eye_height_orig
-        current_eye_height_right = 1
-    else:
-        # If eyes are already open, no need for animation
-        logging.info("Eyes are already open. Skipping opening animation.")
-        return
+        # Define the speed of animation in pixels per frame
+        movement_speed = {"fast": 4, "medium": 2, "slow": 1}.get(speed, 2)
 
-    # Define the speed of animation in pixels per frame
-    movement_speed = {"fast": 4, "medium": 2, "slow": 1}.get(speed, 2)
-
-    while True:
-        if eye in ["both", "left"]:
-            current_eye_height_left = min(left_eye_height_orig, current_eye_height_left + movement_speed)
-        if eye in ["both", "right"]:
-            current_eye_height_right = min(right_eye_height_orig, current_eye_height_right + movement_speed)
-
-        # Break when the specified eye(s) are fully open
-        if eye == "both" and current_eye_height_left >= left_eye_height_orig and current_eye_height_right >= right_eye_height_orig:
-            current_closed = None
-            break
-        elif eye == "left" and current_eye_height_left >= left_eye_height_orig:
-            current_closed = "right" if current_closed == "both" else None
-            break
-        elif eye == "right" and current_eye_height_right >= right_eye_height_orig:
-            current_closed = "left" if current_closed == "both" else None
-            break
-
-        time.sleep(1 / config["render"]["fps"])  # Control the frame rate
-
-    # Ensure the smaller eye waits for the larger one to reach original height
-    if eye == "both":
-        while current_eye_height_left < left_eye_height_orig or current_eye_height_right < right_eye_height_orig:
-            if current_eye_height_left < left_eye_height_orig:
+        while True:
+            if eye in ["both", "left"]:
                 current_eye_height_left = min(left_eye_height_orig, current_eye_height_left + movement_speed)
-            if current_eye_height_right < right_eye_height_orig:
+            if eye in ["both", "right"]:
                 current_eye_height_right = min(right_eye_height_orig, current_eye_height_right + movement_speed)
+
+            # Break when the specified eye(s) are fully open
+            if eye == "both" and current_eye_height_left >= left_eye_height_orig and current_eye_height_right >= right_eye_height_orig:
+                current_closed = None
+                break
+            elif eye == "left" and current_eye_height_left >= left_eye_height_orig:
+                current_closed = "right" if current_closed == "both" else None
+                break
+            elif eye == "right" and current_eye_height_right >= right_eye_height_orig:
+                current_closed = "left" if current_closed == "both" else None
+                break
+
             time.sleep(1 / config["render"]["fps"])  # Control the frame rate
 
-    # Ensure eye heights are set correctly for cyclops mode
-    if current_cyclops:
-        current_eye_height_left = left_eye_height_orig
-        current_eye_height_right = right_eye_height_orig
+        # Ensure the smaller eye waits for the larger one to reach original height
+        if eye == "both":
+            while current_eye_height_left < left_eye_height_orig or current_eye_height_right < right_eye_height_orig:
+                if current_eye_height_left < left_eye_height_orig:
+                    current_eye_height_left = min(left_eye_height_orig, current_eye_height_left + movement_speed)
+                if current_eye_height_right < right_eye_height_orig:
+                    current_eye_height_right = min(right_eye_height_orig, current_eye_height_right + movement_speed)
+                time.sleep(1 / config["render"]["fps"])  # Control the frame rate
+
+        # Ensure eye heights are set correctly for cyclops mode
+        if current_cyclops:
+            current_eye_height_left = left_eye_height_orig
+            current_eye_height_right = right_eye_height_orig
         
 def blink_eyes(device, config, eye="both", speed="fast"):
     close_eyes(device, config, eye=eye, speed=speed)
