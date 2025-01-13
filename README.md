@@ -6,6 +6,9 @@ Started as a cozmo/vector like eye plugin for the pwnagotchi, based on the [Flux
 I try to translate the arduino libraries features to python as a framework for displaying the pwnagotchis mood on an oled screen, that can be used for many other projects as well.
 To make it flexible it is using the luma libraries for display handling, and PIL for drawing the frames from primitives (rounded rectangles, polygons etc.). It supports configurable screen settings, eye shapes, and a variety of animations, including eye movement, blinking, face expressions, and more. The script is designed to be modular and customizable through configuration files. 
 
+[![Project Pilluma - Alpha test](https://img.youtube.com/vi/sC6G5wt-hSE/0.jpg)](https://www.youtube.com/watch?v=sC6G5wt-hSE)
+
+
 **Implemented features:**
   - SSD1306 driver is tested and working with 128x64 and 128x32 screens, SH1107 driver is tested and working with 128x128 screen
   - Default eye and display settings are loaded from the script, but can be changed with eye.config.toml and screenconfig.toml.
